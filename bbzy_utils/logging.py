@@ -17,26 +17,27 @@ class ContextLogger:
 
 
 def init_logger(
-        logger,
+        name,
         log_level=logging.INFO if not __debug__ else logging.DEBUG,
         *,
         log_name=False,
         log_process=False,
         log_thread=False,
         stream=None,
-        clean_handler=False,
+        clean_handlers=False,
 ):
     """
-    :param logging.Logger logger:
+    :param str name:
     :param int log_level:
     :param bool log_name:
     :param bool log_process:
     :param bool log_thread:
     :param TextIO stream: None for stdout
-    :param bool clean_handler:
+    :param bool clean_handlers:
     :rtype: logging.Logger
     :return:
     """
+    logger = logging.getLogger(name)
     logger.setLevel(log_level)
     log_format_parts = list()
     if log_process:
@@ -54,7 +55,7 @@ def init_logger(
     handler = logging.StreamHandler(stream)
     formatter = logging.Formatter(' '.join(log_format_parts))
     handler.setFormatter(formatter)
-    if clean_handler:
+    if clean_handlers:
         while logger.handlers:
             logger.removeHandler(logger.handlers[-1])
     logger.addHandler(handler)
