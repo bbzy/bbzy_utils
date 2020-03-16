@@ -60,3 +60,15 @@ def init_logger(
             logger.removeHandler(logger.handlers[-1])
     logger.addHandler(handler)
     return logger
+
+
+_global_logger = logging.root
+
+
+def set_global_logger(logger: Logger):
+    global _global_logger
+    _global_logger = logger
+
+
+def global_logger() -> Logger:
+    return _global_logger
