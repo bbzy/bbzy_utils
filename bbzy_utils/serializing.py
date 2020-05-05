@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Callable, Iterator, Generic, TypeVar
+from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional
 import json
 import os
 import io
@@ -111,14 +111,15 @@ def load_pickle_context(base_path: str, chunk_size: int = 0):
 
 
 class AutoSerializationWrapperBase(Generic[T]):
-    def __init__(self, obj: T, serializing_path: str):
-        self._object = obj
+    def __init__(self, serializing_path: str, default_value: Optional[Any] = None):
+        self._object = default_value
         self._path = serializing_path
         self._dirty = False
         loaded = self.load()
         if loaded is not None:
             self._object = loaded
         else:
+            self._object = default_value
             self.save(self._object)
 
     @property
@@ -154,14 +155,15 @@ class AutoSerializationWrapperBase(Generic[T]):
 
 
 class AutoPickleWrapper(AutoSerializationWrapperBase[T]):
-    def __init__(self, obj: T, serializing_path: str):
-        super().__init__(obj, serializing_path + '.pkl')
+    def __init__(self, serializing_path: str, default_value: Optional[Any] = None):
+        super().__init__(serializing_path + '.pkl', default_value)
 
     def load(self):
         if not os.path.isfile(self.path):
             return None
         with open(self.path, 'rb') as fp:
-            return pickle.load(fp)
+            loaded = pickle.load(fp)
+            return loaded
 
     def save(self, obj):
         with open(self.path, 'wb') as fp:
@@ -169,15 +171,69 @@ class AutoPickleWrapper(AutoSerializationWrapperBase[T]):
 
 
 class AutoJsonWrapper(AutoSerializationWrapperBase[T]):
-    def __init__(self, obj: T, serializing_path: str):
-        super().__init__(obj, serializing_path + '.json')
+    class JsonEncoder(json.JSONEncoder):
+        def default(self, o: Any) -> Any:
+            return getattr(o, 'to_json')()
+
+    def __init__(
+            self,
+            serializing_path: str,
+            default_value: Optional[Any] = None,
+            from_json: Callable[[Any], Any] = None,
+            to_json: Callable[[Any], Any] = None,
+    ):
+        self._from_json = from_json
+        self._to_json = to_json
+        super().__init__(serializing_path + '.json', default_value)
 
     def load(self):
         if not os.path.isfile(self.path):
-            return False
-        with open(self.path, 'rb') as fp:
-            return json.load(fp)
+            return None
+        with open(self.path) as fp:
+            loaded = json.load(fp)
+            if self._from_json:
+                loaded = self._from_json(loaded)
+            return loaded
 
     def save(self, obj):
-        with open(self.path, 'wb') as fp:
-            json.dump(obj, fp)
+        tmp_path = self.path + '.tmp'
+        if self._to_json is not None:
+            obj = self._to_json(obj)
+        with open(tmp_path, 'w') as fp:
+            json.dump(obj, fp, cls=AutoJsonWrapper.JsonEncoder)
+        os.rename(tmp_path, self.path)
+
+
+class FromJson:
+    def __init__(self, t: Type):
+        self._type = t
+
+    @property
+    def type(self):
+        return self._type
+
+    def __call__(self, obj):
+        return self._from_json(self._type, obj)
+
+    @classmethod
+    def _from_json(cls, t: Type, obj):
+        origin = getattr(t, '__origin__', None)
+        if origin is None:
+            # For types are not in typing
+            origin = t
+        if origin is str:
+            return str(obj)
+        elif origin is int:
+            return int(obj)
+        elif origin is float:
+            return float(obj)
+        args = getattr(t, '__args__', None)
+        if origin is tuple:
+            return tuple(cls._from_json(args[i], v) for i, v in enumerate(obj))
+        elif origin is list:
+            vt = args[0]
+            return [cls._from_json(vt, v) for i, v in enumerate(obj)]
+        elif origin is dict:
+            kt, vt = args
+            return {cls._from_json(kt, k): cls._from_json(vt, v) for k, v in obj.items()}
+        return getattr(t, 'from_json')(obj)

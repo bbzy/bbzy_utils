@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Generic, TypeVar, DefaultDict, Set, Optional, Dict
+from typing import Generic, TypeVar, DefaultDict, Set, Optional, Dict, List, Tuple
 
 T = TypeVar('T')
 LT = TypeVar('LT')
@@ -10,6 +10,14 @@ class TwoClassesGraph(Generic[LT, RT]):
     def __init__(self):
         self._left_nodes = defaultdict(set)  # type: DefaultDict[LT, Set[RT]]
         self._right_nodes = defaultdict(set)  # type: DefaultDict[RT, Set[LT]]
+
+    @property
+    def edges(self) -> List[Tuple[LT, RT]]:
+        return [
+            (k, v)
+            for k, s in self._left_nodes.items()
+            for v in s
+        ]
 
     def get_from_left(self, k: LT) -> Set[RT]:
         return self._left_nodes.get(k, set())
@@ -77,6 +85,10 @@ class TwoClassesDict(Generic[LT, RT]):
     def __init__(self):
         self._left_nodes = dict()  # type: Dict[LT, RT]
         self._right_nodes = dict()  # type: Dict[RT, LT]
+
+    @property
+    def edges(self) -> List[Tuple[LT, RT]]:
+        return list(self._left_nodes.items())
 
     def get_from_left(self, k: LT) -> Set[RT]:
         res = self.get_first_from_left(k)
