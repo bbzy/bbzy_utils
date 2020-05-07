@@ -217,7 +217,7 @@ class FromJson:
 
     @classmethod
     def _from_json(cls, t: Type, obj):
-        origin = getattr(t, '__origin__', None)
+        origin = getattr(t, '__origin__', None) or getattr(t, '__extra__', None)
         if origin is None:
             # For types are not in typing
             origin = t
