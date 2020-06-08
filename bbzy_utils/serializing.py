@@ -1,10 +1,11 @@
 from abc import abstractmethod
-from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional
+from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict, Tuple
 import json
 import os
 import io
 import pickle
 import contextlib
+from functools import partial
 
 T = TypeVar('T')
 
@@ -171,14 +172,11 @@ class AutoPickleWrapper(AutoSerializationWrapperBase[T]):
 
 
 class AutoJsonWrapper(AutoSerializationWrapperBase[T]):
-    class JsonEncoder(json.JSONEncoder):
-        def default(self, o: Any) -> Any:
-            return getattr(o, 'to_json')()
-
     def __init__(
             self,
             serializing_path: str,
             default_value: Optional[Any] = None,
+            *,
             from_json: Callable[[Any], Any] = None,
             to_json: Callable[[Any], Any] = None,
     ):
@@ -200,40 +198,80 @@ class AutoJsonWrapper(AutoSerializationWrapperBase[T]):
         if self._to_json is not None:
             obj = self._to_json(obj)
         with open(tmp_path, 'w') as fp:
-            json.dump(obj, fp, cls=AutoJsonWrapper.JsonEncoder)
+            json.dump(obj, fp)
         os.rename(tmp_path, self.path)
 
 
-class FromJson:
-    def __init__(self, t: Type):
-        self._type = t
+class AutoJsonWrapperEx(AutoSerializationWrapperBase[T]):
+    class JsonEncoder(json.JSONEncoder):
+        def __init__(self, cast_map: Optional[Dict[Type, Tuple[Callable, Callable]]], *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._cast_map = cast_map
 
-    @property
-    def type(self):
-        return self._type
+        def iterencode(self, o, _one_shot=False):
+            if self._cast_map is not None:
+                t = type(o)
+                cast_pred = self._cast_map.get(t)
+                if cast_pred is not None:
+                    return cast_pred[1](o)
+            return super().iterencode(o, _one_shot)
 
-    def __call__(self, obj):
-        return self._from_json(self._type, obj)
+        def default(self, o):
+            return getattr(o, 'to_json')()
 
-    @classmethod
-    def _from_json(cls, t: Type, obj):
+    def __init__(
+            self,
+            serializing_path: str,
+            decl_type: Type,
+            default_value: Optional[Any] = None,
+            cast_map: Optional[Dict[Type, Tuple[Callable, Callable]]] = None,
+    ):
+        """
+        :param decl_type: Complete type from typing module like List[Tuple[str, int]]
+        :param cast_map: The first element of the value is from_pred and the second is to_pred
+        """
+        self._decl_type = decl_type
+        self._cast_map = cast_map
+        super().__init__(serializing_path + '.json', default_value)
+
+    def load(self):
+        if not os.path.isfile(self.path):
+            return None
+        with open(self.path) as fp:
+            loaded = json.load(fp)
+            return self._from_json(self._decl_type, loaded)
+
+    def save(self, obj):
+        tmp_path = self.path + '.tmp'
+        with open(tmp_path, 'w') as fp:
+            json.dump(obj, fp, cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
+        os.rename(tmp_path, self.path)
+
+    def _from_json(self, t: Type, obj):
         origin = getattr(t, '__origin__', None)
         if origin is None:
             # For types are not in typing
             origin = t
+        # ==== In Typing Mapping ====
+        cast_pred = self._cast_map.get(origin)
+        if cast_pred is not None:
+            return cast_pred[0](origin)
+        # ==== Primitive ====
         if origin is str:
             return str(obj)
         elif origin is int:
             return int(obj)
         elif origin is float:
             return float(obj)
+        # ==== Collection ====
         args = getattr(t, '__args__', None)
         if origin is tuple:
-            return tuple(cls._from_json(args[i], v) for i, v in enumerate(obj))
+            return tuple(self._from_json(args[i], v) for i, v in enumerate(obj))
         elif origin is list:
             vt = args[0]
-            return [cls._from_json(vt, v) for i, v in enumerate(obj)]
+            return [self._from_json(vt, v) for i, v in enumerate(obj)]
         elif origin is dict:
             kt, vt = args
-            return {cls._from_json(kt, k): cls._from_json(vt, v) for k, v in obj.items()}
+            return {self._from_json(kt, k): self._from_json(vt, v) for k, v in obj.items()}
+        # ==== ====
         return getattr(t, 'from_json')(obj)
