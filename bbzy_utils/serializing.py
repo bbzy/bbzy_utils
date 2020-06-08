@@ -248,7 +248,7 @@ class AutoJsonWrapperEx(AutoSerializationWrapperBase[T]):
         os.rename(tmp_path, self.path)
 
     def _from_json(self, t: Type, obj):
-        origin = getattr(t, '__origin__', None)
+        origin = getattr(t, '__origin__', None) or getattr(t, '__extra__', None)
         if origin is None:
             # For types are not in typing
             origin = t
