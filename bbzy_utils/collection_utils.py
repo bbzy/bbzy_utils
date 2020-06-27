@@ -1,5 +1,6 @@
 from contextlib import contextmanager
-from typing import Iterable, List, Any, Callable, TypeVar, Dict, Iterator, Sized, Union, Reversible
+from typing import Iterable, List, Any, Callable, TypeVar, Dict, \
+    Iterator, Sized, Union, Reversible, ContextManager, Set
 
 T = TypeVar('T')
 K = TypeVar('K')
@@ -39,34 +40,54 @@ def rfind(a: Union[Reversible, Sized], v: Any, *, key: Callable = None) -> int:
     return -1
 
 
-def list_select(a: list, indices: Iterable[int]) -> list:
-    new_list = list()
-    for i in indices:
-        new_list.append(a[i])
-    return new_list
-
-
-def list_remove(a: list, indices: Iterable[int]) -> list:
-    new_list = list()
-    indices = set(indices)
-    for i in range(len(a)):
-        if i not in indices:
-            new_list.append(a[i])
-    return new_list
-
-
 @contextmanager
-def _list_action_context(a: list, action: Callable[[list, Iterable[int]], list]):
+def list_select_context(a: list) -> ContextManager[List[int]]:
     indices = list()
     try:
         yield indices
     finally:
-        a[:] = action(a, indices)
+        new_list = list()
+        for i in indices:
+            new_list.append(a[i])
+        a[:] = new_list
 
 
-def list_select_context(a: list):
-    return _list_action_context(a, list_select)
+@contextmanager
+def list_remove_context(a: list) -> ContextManager[Set[int]]:
+    indices = set()
+    try:
+        yield indices
+    finally:
+        if not indices:
+            return
+        new_list = list()
+        for i, v in enumerate(a):
+            if i not in indices:
+                new_list.append(v)
+        a[:] = new_list
 
 
-def list_remove_context(a: list):
-    return _list_action_context(a, list_remove)
+@contextmanager
+def dict_select_context(d: dict) -> ContextManager[List[int]]:
+    keys = list()
+    try:
+        yield keys
+    finally:
+        new_dict = dict()
+        for k in keys:
+            new_dict[k] = d[k]
+        d.clear()
+        d.update(new_dict)
+
+
+@contextmanager
+def dict_remove_context(d: dict) -> ContextManager[set]:
+    keys = set()
+    try:
+        yield keys
+    finally:
+        if not keys:
+            return
+        for i in d:
+            if i in keys:
+                del d[i]
