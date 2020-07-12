@@ -40,6 +40,22 @@ def rfind(a: Union[Reversible, Sized], v: Any, *, key: Callable = None) -> int:
     return -1
 
 
+def list_select(a: list, indices: Iterable[int]) -> list:
+    new_list = list()
+    for i in indices:
+        new_list.append(a[i])
+    return new_list
+
+
+def list_remove(a: list, indices: Iterable[int]) -> list:
+    new_list = list()
+    indices = set(indices)
+    for i in range(len(a)):
+        if i not in indices:
+            new_list.append(a[i])
+    return new_list
+
+
 @contextmanager
 def list_select_context(a: list) -> ContextManager[List[int]]:
     indices = list()

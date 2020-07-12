@@ -209,15 +209,48 @@ class AutoJsonWrapperEx(AutoSerializationWrapperBase[T]):
             self._cast_map = cast_map
 
         def iterencode(self, o, _one_shot=False):
-            if self._cast_map is not None:
-                t = type(o)
-                cast_pred = self._cast_map.get(t)
-                if cast_pred is not None:
-                    return cast_pred[1](o)
+            cast_o = self._cast(o)
+            if cast_o is not None:
+                return cast_o
+            if isinstance(o, dict):
+                keys_to_remove = list()
+                new_dict = dict()
+                for k, v in o.items():
+                    if k is None or isinstance(k, (str, int, float, bool)):
+                        continue
+                    cast_k = self._cast(k)
+                    if cast_k is None:
+                        break
+                    keys_to_remove.append(k)
+                    new_dict[cast_k] = v
+                for k in keys_to_remove:
+                    o.pop(k)
+                o.update(new_dict)
             return super().iterencode(o, _one_shot)
 
         def default(self, o):
-            return getattr(o, 'to_json')()
+            cast_o = self._cast(o)
+            if cast_o is None:
+                super().default(o)
+            return cast_o
+
+        def _cast(self, o) -> Optional[str]:
+            return self._cast_with_cast_map(o) or self._cast_with_method(o)
+
+        def _cast_with_cast_map(self, o) -> Optional[str]:
+            if self._cast_map is None:
+                return None
+            t = type(o)
+            cast_pred = self._cast_map.get(t)
+            if cast_pred is None:
+                return None
+            return json.dumps(cast_pred[1](o), cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
+
+        def _cast_with_method(self, o) -> Optional[str]:
+            to_json_method = getattr(o, 'to_json', None)
+            if to_json_method is None:
+                return None
+            return json.dumps(to_json_method(), cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
 
     def __init__(
             self,
@@ -253,9 +286,10 @@ class AutoJsonWrapperEx(AutoSerializationWrapperBase[T]):
             # For types are not in typing
             origin = t
         # ==== In Typing Mapping ====
-        cast_pred = self._cast_map.get(origin)
-        if cast_pred is not None:
-            return cast_pred[0](origin)
+        if self._cast_map:
+            cast_pred = self._cast_map.get(origin)
+            if cast_pred is not None:
+                return cast_pred[0](obj)
         # ==== Primitive ====
         if origin is str:
             return str(obj)
