@@ -1,11 +1,11 @@
 from abc import abstractmethod
 from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict, Tuple
+from collections import defaultdict
 import json
 import os
 import io
 import pickle
 import contextlib
-from functools import partial
 
 T = TypeVar('T')
 
@@ -111,201 +111,186 @@ def load_pickle_context(base_path: str, chunk_size: int = 0):
     return LoadPickleContext(base_path)
 
 
-class AutoSerializationWrapperBase(Generic[T]):
-    def __init__(self, serializing_path: str, default_value: Optional[Any] = None):
-        self._object = default_value
+def to_jsonable(obj, cast_map: Optional[Dict[type, Callable[[Any], Any]]] = None) -> Any:
+    if cast_map is None:
+        cast_map = dict()
+
+    def _to_jsonable(_obj):
+        _type = type(_obj)
+        _cast_pred = cast_map.get(_type)
+        if _cast_pred:
+            return _to_jsonable(_cast_pred(_obj))
+        if _obj is None or isinstance(_obj, (str, int, float, bool)):
+            return _obj
+        if isinstance(_obj, list):
+            for _i, _v in enumerate(_obj):
+                _obj[_i] = _to_jsonable(_v)
+            return _obj
+        if isinstance(_obj, (set, tuple)):
+            return [_to_jsonable(_i) for _i in _obj]
+        if isinstance(_obj, (dict, defaultdict)):
+            _modified = list()
+            for _k, _v in _obj.items():
+                _k_res = _to_jsonable(_k)
+                _v_res = _to_jsonable(_v)
+                _modified.append((_k, _k_res, _v_res))
+            for _k, _k_res, _v_res in _modified:
+                if _k_res != _k:
+                    del _obj[_k]
+                _obj[_k_res] = _v_res
+            return _obj
+        _pred = getattr(_obj, 'to_jsonable', None)
+        if _pred:
+            return _to_jsonable(_pred(_obj))
+        raise TypeError('Invalid type: {}'.format(_type))
+
+    return _to_jsonable(obj)
+
+
+def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], Any]]] = None) -> Any:
+    if cast_map is None:
+        cast_map = dict()
+
+    def _from_jsonable(_obj, _t: Type):
+        _type_used = getattr(_t, '__origin__', None) or getattr(_t, '__extra__', None)
+        if _type_used is None:
+            # For types are not in typing
+            _type_used = _t
+
+        # ==== In Typing Mapping ====
+        _cast_pred = cast_map.get(_type_used)
+        if _cast_pred is not None:
+            return _cast_pred(_obj)
+
+        # ==== Primitive ====
+        if _type_used is str:
+            return str(_obj)
+        elif _type_used is int:
+            return int(_obj)
+        elif _type_used is float:
+            return float(_obj)
+
+        # ==== Collection ====
+        _arg_types = getattr(_t, '__args__', None)
+        if _arg_types:
+            if _type_used is tuple:
+                return tuple(_from_jsonable(_v, _arg_types[_i]) for _i, _v in enumerate(_obj))
+            elif _type_used is list:
+                _vt = _arg_types[0]
+                return [_from_jsonable(_v, _vt) for _i, _v in enumerate(_obj)]
+            elif _type_used is dict:
+                _kt, _vt = _arg_types
+                return {_from_jsonable(_k, _kt): _from_jsonable(_v, _vt) for _k, _v in _obj.items()}
+        # ==== ====
+        _pred = getattr(_t, 'from_jsonable', None)
+        if _pred:
+            return _pred(_obj)
+        raise TypeError('Invalid value: {}'.format(_obj))
+
+    return _from_jsonable(obj, t)
+
+
+class SerializableObjectBase(Generic[T]):
+    def __init__(self, serializing_path: str):
         self._path = serializing_path
+        self._object = self.load()
         self._dirty = False
-        loaded = self.load()
-        if loaded is not None:
-            self._object = loaded
-        else:
-            self._object = default_value
-            self.save(self._object)
 
     @property
     def path(self):
         return self._path
 
-    def get_object(self) -> T:
-        self._dirty = True
+    @property
+    def dirty(self):
+        return self._dirty
+
+    @dirty.setter
+    def dirty(self, value: bool):
+        self._dirty = value
+
+    @property
+    def object(self) -> T:
         return self._object
 
-    def set_object(self, obj: T):
-        self._object = obj
-        self.save(self._object)
+    @object.setter
+    def object(self, new_object: T):
+        self._object = new_object
+        self.save()
         self._dirty = False
 
     @abstractmethod
-    def load(self) -> T:
+    def load(self):
         raise NotImplementedError()
 
     @abstractmethod
-    def save(self, obj: T):
+    def save(self):
         raise NotImplementedError()
 
-    def __enter__(self) -> T:
-        if self._dirty:
-            self._object = self.load()
-            self._dirty = False
-        return self._object
+    def __enter__(self):
+        return SerializableObjectWrapper(self._object)  # type: SerializableObjectWrapper[T]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.save(self._object)
-        self._dirty = False
+        if self._dirty:
+            self.save()
+            self._dirty = False
 
 
-class AutoPickleWrapper(AutoSerializationWrapperBase[T]):
-    def __init__(self, serializing_path: str, default_value: Optional[Any] = None):
-        super().__init__(serializing_path + '.pkl', default_value)
+class SerializableObjectWrapper(Generic[T]):
+    def __init__(self, serializable_object: SerializableObjectBase):
+        self._serializable_object = serializable_object
+
+    def write(self, new_object: T):
+        self._serializable_object.object = new_object
+
+    @property
+    def writable(self) -> T:
+        self._serializable_object.dirty = True
+        return self._serializable_object.object
+
+    @property
+    def readonly(self) -> T:
+        return self._serializable_object.object
+
+
+class SerializablePickObject(SerializableObjectBase[T]):
+    def __init__(self, serializing_path: str):
+        super().__init__(serializing_path + '.pkl')
 
     def load(self):
         if not os.path.isfile(self.path):
             return None
         with open(self.path, 'rb') as fp:
-            loaded = pickle.load(fp)
-            return loaded
+            self.object = pickle.load(fp)
 
-    def save(self, obj):
+    def save(self):
         with open(self.path, 'wb') as fp:
-            pickle.dump(obj, fp)
+            pickle.dump(self.object, fp)
 
 
-class AutoJsonWrapper(AutoSerializationWrapperBase[T]):
-    def __init__(
-            self,
-            serializing_path: str,
-            default_value: Optional[Any] = None,
-            *,
-            from_json: Callable[[Any], Any] = None,
-            to_json: Callable[[Any], Any] = None,
-    ):
-        self._from_json = from_json
-        self._to_json = to_json
-        super().__init__(serializing_path + '.json', default_value)
-
-    def load(self):
-        if not os.path.isfile(self.path):
-            return None
-        with open(self.path) as fp:
-            loaded = json.load(fp)
-            if self._from_json:
-                loaded = self._from_json(loaded)
-            return loaded
-
-    def save(self, obj):
-        tmp_path = self.path + '.tmp'
-        if self._to_json is not None:
-            obj = self._to_json(obj)
-        with open(tmp_path, 'w') as fp:
-            json.dump(obj, fp)
-        os.rename(tmp_path, self.path)
-
-
-class AutoJsonWrapperEx(AutoSerializationWrapperBase[T]):
-    class JsonEncoder(json.JSONEncoder):
-        def __init__(self, cast_map: Optional[Dict[Type, Tuple[Callable, Callable]]], *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._cast_map = cast_map
-
-        def iterencode(self, o, _one_shot=False):
-            cast_o = self._cast(o)
-            if cast_o is not None:
-                return cast_o
-            if isinstance(o, dict):
-                keys_to_remove = list()
-                new_dict = dict()
-                for k, v in o.items():
-                    if k is None or isinstance(k, (str, int, float, bool)):
-                        continue
-                    cast_k = self._cast(k)
-                    if cast_k is None:
-                        break
-                    keys_to_remove.append(k)
-                    new_dict[cast_k] = v
-                for k in keys_to_remove:
-                    o.pop(k)
-                o.update(new_dict)
-            return super().iterencode(o, _one_shot)
-
-        def default(self, o):
-            cast_o = self._cast(o)
-            if cast_o is None:
-                super().default(o)
-            return cast_o
-
-        def _cast(self, o) -> Optional[str]:
-            return self._cast_with_cast_map(o) or self._cast_with_method(o)
-
-        def _cast_with_cast_map(self, o) -> Optional[str]:
-            if self._cast_map is None:
-                return None
-            t = type(o)
-            cast_pred = self._cast_map.get(t)
-            if cast_pred is None:
-                return None
-            return json.dumps(cast_pred[1](o), cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
-
-        def _cast_with_method(self, o) -> Optional[str]:
-            to_json_method = getattr(o, 'to_json', None)
-            if to_json_method is None:
-                return None
-            return json.dumps(to_json_method(), cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
-
+class SerializableJsonObject(SerializableObjectBase[T]):
     def __init__(
             self,
             serializing_path: str,
             decl_type: Type,
-            default_value: Optional[Any] = None,
-            cast_map: Optional[Dict[Type, Tuple[Callable, Callable]]] = None,
+            cast_map_for_loading: Optional[Dict[Type, Callable[[Any], Any]]] = None,
+            cast_map_for_saving: Optional[Dict[Type, Callable[[Any], Any]]] = None,
     ):
         """
         :param decl_type: Complete type from typing module like List[Tuple[str, int]]
-        :param cast_map: The first element of the value is from_pred and the second is to_pred
         """
+        super().__init__(serializing_path + '.json')
         self._decl_type = decl_type
-        self._cast_map = cast_map
-        super().__init__(serializing_path + '.json', default_value)
+        self._cast_map_for_loading = cast_map_for_loading
+        self._cast_map_for_saving = cast_map_for_saving
 
     def load(self):
         if not os.path.isfile(self.path):
             return None
         with open(self.path) as fp:
-            loaded = json.load(fp)
-            return self._from_json(self._decl_type, loaded)
+            self.object = from_jsonable(json.load(fp), self._decl_type, self._cast_map_for_loading)
 
-    def save(self, obj):
+    def save(self):
         tmp_path = self.path + '.tmp'
         with open(tmp_path, 'w') as fp:
-            json.dump(obj, fp, cls=partial(AutoJsonWrapperEx.JsonEncoder, self._cast_map))
+            json.dump(to_jsonable(self.object, self._cast_map_for_saving), fp)
         os.rename(tmp_path, self.path)
-
-    def _from_json(self, t: Type, obj):
-        origin = getattr(t, '__origin__', None) or getattr(t, '__extra__', None)
-        if origin is None:
-            # For types are not in typing
-            origin = t
-        # ==== In Typing Mapping ====
-        if self._cast_map:
-            cast_pred = self._cast_map.get(origin)
-            if cast_pred is not None:
-                return cast_pred[0](obj)
-        # ==== Primitive ====
-        if origin is str:
-            return str(obj)
-        elif origin is int:
-            return int(obj)
-        elif origin is float:
-            return float(obj)
-        # ==== Collection ====
-        args = getattr(t, '__args__', None)
-        if origin is tuple:
-            return tuple(self._from_json(args[i], v) for i, v in enumerate(obj))
-        elif origin is list:
-            vt = args[0]
-            return [self._from_json(vt, v) for i, v in enumerate(obj)]
-        elif origin is dict:
-            kt, vt = args
-            return {self._from_json(kt, k): self._from_json(vt, v) for k, v in obj.items()}
-        # ==== ====
-        return getattr(t, 'from_json')(obj)
