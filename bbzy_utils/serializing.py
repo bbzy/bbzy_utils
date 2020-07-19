@@ -179,8 +179,10 @@ def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], An
 
 class SerializableObjectBase(Generic[T]):
     def __init__(self, default_value: T):
-        self._object = self.load()
+        self._object = None
         self._dirty = False
+        if not self.load():
+            self._object = default_value
 
     @property
     def dirty(self):
