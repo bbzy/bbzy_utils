@@ -1,11 +1,11 @@
-from abc import abstractmethod
-from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict, Tuple
-from collections import defaultdict
+import contextlib
+import io
 import json
 import os
-import io
 import pickle
-import contextlib
+from abc import abstractmethod
+from collections import defaultdict
+from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict
 
 T = TypeVar('T')
 
@@ -122,26 +122,13 @@ def to_jsonable(obj, cast_map: Optional[Dict[type, Callable[[Any], Any]]] = None
             return _to_jsonable(_cast_pred(_obj))
         if _obj is None or isinstance(_obj, (str, int, float, bool)):
             return _obj
-        if isinstance(_obj, list):
-            for _i, _v in enumerate(_obj):
-                _obj[_i] = _to_jsonable(_v)
-            return _obj
-        if isinstance(_obj, (set, tuple)):
+        if isinstance(_obj, (list, set, tuple)):
             return [_to_jsonable(_i) for _i in _obj]
         if isinstance(_obj, (dict, defaultdict)):
-            _modified = list()
-            for _k, _v in _obj.items():
-                _k_res = _to_jsonable(_k)
-                _v_res = _to_jsonable(_v)
-                _modified.append((_k, _k_res, _v_res))
-            for _k, _k_res, _v_res in _modified:
-                if _k_res != _k:
-                    del _obj[_k]
-                _obj[_k_res] = _v_res
-            return _obj
+            return {_to_jsonable(_k): _to_jsonable(_v) for _k, _v in _obj.items()}
         _pred = getattr(_obj, 'to_jsonable', None)
         if _pred:
-            return _to_jsonable(_pred(_obj))
+            return _to_jsonable(_pred())
         raise TypeError('Invalid type: {}'.format(_type))
 
     return _to_jsonable(obj)
@@ -208,12 +195,10 @@ class SerializableObjectBase(Generic[T]):
     def dirty(self, value: bool):
         self._dirty = value
 
-    @property
-    def object(self) -> T:
+    def get_object(self) -> T:
         return self._object
 
-    @object.setter
-    def object(self, new_object: T):
+    def set_object(self, new_object: T):
         self._object = new_object
         self.save()
         self._dirty = False
@@ -227,7 +212,10 @@ class SerializableObjectBase(Generic[T]):
         raise NotImplementedError()
 
     def __enter__(self):
-        return SerializableObjectWrapper(self._object)  # type: SerializableObjectWrapper[T]
+        """
+        :rtype: SerializableObjectWrapper[T]
+        """
+        return SerializableObjectWrapper(self)  # type:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._dirty:
@@ -236,23 +224,18 @@ class SerializableObjectBase(Generic[T]):
 
 
 class SerializableObjectWrapper(Generic[T]):
-    def __init__(self, serializable_object: SerializableObjectBase):
+    def __init__(self, serializable_object: SerializableObjectBase[T]):
         self._serializable_object = serializable_object
 
-    def write(self, new_object: T):
-        self._serializable_object.object = new_object
-
-    @property
-    def writable(self) -> T:
+    def w(self) -> T:
         self._serializable_object.dirty = True
-        return self._serializable_object.object
+        return self._serializable_object.get_object()
 
-    @property
-    def readonly(self) -> T:
-        return self._serializable_object.object
+    def r(self) -> T:
+        return self._serializable_object.get_object()
 
 
-class SerializablePickObject(SerializableObjectBase[T]):
+class SerializablePickleObject(SerializableObjectBase[T]):
     def __init__(self, serializing_path: str):
         super().__init__(serializing_path + '.pkl')
 
@@ -260,11 +243,11 @@ class SerializablePickObject(SerializableObjectBase[T]):
         if not os.path.isfile(self.path):
             return None
         with open(self.path, 'rb') as fp:
-            self.object = pickle.load(fp)
+            self.set_object(pickle.load(fp))
 
     def save(self):
         with open(self.path, 'wb') as fp:
-            pickle.dump(self.object, fp)
+            pickle.dump(self.get_object(), fp)
 
 
 class SerializableJsonObject(SerializableObjectBase[T]):
@@ -287,10 +270,10 @@ class SerializableJsonObject(SerializableObjectBase[T]):
         if not os.path.isfile(self.path):
             return None
         with open(self.path) as fp:
-            self.object = from_jsonable(json.load(fp), self._decl_type, self._cast_map_for_loading)
+            self.set_object(from_jsonable(json.load(fp), self._decl_type, self._cast_map_for_loading))
 
     def save(self):
         tmp_path = self.path + '.tmp'
         with open(tmp_path, 'w') as fp:
-            json.dump(to_jsonable(self.object, self._cast_map_for_saving), fp)
+            json.dump(to_jsonable(self.get_object(), self._cast_map_for_saving), fp)
         os.rename(tmp_path, self.path)
