@@ -178,14 +178,9 @@ def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], An
 
 
 class SerializableObjectBase(Generic[T]):
-    def __init__(self, serializing_path: str):
-        self._path = serializing_path
+    def __init__(self, default_value: T):
         self._object = self.load()
         self._dirty = False
-
-    @property
-    def path(self):
-        return self._path
 
     @property
     def dirty(self):
@@ -203,12 +198,19 @@ class SerializableObjectBase(Generic[T]):
         self.save()
         self._dirty = False
 
+    def set_object_without_saving(self, new_object: T):
+        self._object = new_object
+        self._dirty = True
+
     @abstractmethod
-    def load(self):
+    def load(self) -> bool:
+        """
+        :return: True for loaded and False for file not found
+        """
         raise NotImplementedError()
 
     @abstractmethod
-    def save(self):
+    def save(self) -> None:
         raise NotImplementedError()
 
     def __enter__(self):
@@ -236,17 +238,18 @@ class SerializableObjectWrapper(Generic[T]):
 
 
 class SerializablePickleObject(SerializableObjectBase[T]):
-    def __init__(self, serializing_path: str):
-        super().__init__(serializing_path + '.pkl')
+    def __init__(self, serializing_path: str, default_value: T):
+        self._path = serializing_path + '.pkl'
+        super().__init__(default_value)
 
     def load(self):
-        if not os.path.isfile(self.path):
+        if not os.path.isfile(self._path):
             return None
-        with open(self.path, 'rb') as fp:
+        with open(self._path, 'rb') as fp:
             self.set_object(pickle.load(fp))
 
     def save(self):
-        with open(self.path, 'wb') as fp:
+        with open(self._path, 'wb') as fp:
             pickle.dump(self.get_object(), fp)
 
 
@@ -255,25 +258,32 @@ class SerializableJsonObject(SerializableObjectBase[T]):
             self,
             serializing_path: str,
             decl_type: Type,
+            default_value: T,
             cast_map_for_loading: Optional[Dict[Type, Callable[[Any], Any]]] = None,
             cast_map_for_saving: Optional[Dict[Type, Callable[[Any], Any]]] = None,
     ):
         """
         :param decl_type: Complete type from typing module like List[Tuple[str, int]]
         """
-        super().__init__(serializing_path + '.json')
+        self._path = serializing_path + '.json'
         self._decl_type = decl_type
         self._cast_map_for_loading = cast_map_for_loading
         self._cast_map_for_saving = cast_map_for_saving
+        super().__init__(default_value)
 
-    def load(self):
-        if not os.path.isfile(self.path):
-            return None
-        with open(self.path) as fp:
-            self.set_object(from_jsonable(json.load(fp), self._decl_type, self._cast_map_for_loading))
+    @property
+    def path(self):
+        return self._path
+
+    def load(self) -> bool:
+        if not os.path.isfile(self._path):
+            return False
+        with open(self._path) as fp:
+            self.set_object_without_saving(from_jsonable(json.load(fp), self._decl_type, self._cast_map_for_loading))
+            return True
 
     def save(self):
-        tmp_path = self.path + '.tmp'
+        tmp_path = self._path + '.tmp'
         with open(tmp_path, 'w') as fp:
             json.dump(to_jsonable(self.get_object(), self._cast_map_for_saving), fp)
-        os.rename(tmp_path, self.path)
+        os.rename(tmp_path, self._path)

@@ -99,16 +99,16 @@ class UnitTestCase(TestCase):
         json_object = SerializableJsonObject(
             json_object_base_path,
             Dict[datetime.date, List[Tuple[int, TestSerializingClass]]],
+            dict(),
             {datetime.date: lambda _dt: datetime.datetime.strptime(_dt, '%Y-%m-%d').date()},
             {datetime.date: lambda _dt: datetime.date.strftime(_dt, '%Y-%m-%d')}
         )  # type: SerializableJsonObject[Dict[datetime.date, List[Tuple[int, TestSerializingClass]]]]
-        full_path = json_object.path
-        self.assertFalse(os.path.exists(full_path))
+        self.assertFalse(os.path.exists(json_object.path))
         json_object.set_object({
             datetime.date(1991, 7, 19): [(1, TestSerializingClass(3))],
             datetime.date(2020, 7, 19): [(2, TestSerializingClass(28))],
         })
-        self.assertTrue(os.path.isfile(full_path))
+        self.assertTrue(os.path.isfile(json_object.path))
         json_object_file_dict = load_json(json_object_base_path)
         with json_object as json_object_context:
             json_object_context.r()[datetime.date(2014, 1, 1)] = [(4, TestSerializingClass(3))]
