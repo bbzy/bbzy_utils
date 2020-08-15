@@ -8,6 +8,7 @@ from collections import defaultdict
 from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict
 
 T = TypeVar('T')
+CompleteType = object
 
 
 def write_file(data: bytes, base_path: str, ext_name: str = '.dat'):
@@ -259,7 +260,7 @@ class SerializableJsonObject(SerializableObjectBase[T]):
     def __init__(
             self,
             serializing_path: str,
-            decl_type: Type,
+            decl_type: CompleteType,
             default_value: T,
             cast_map_for_loading: Optional[Dict[Type, Callable[[Any], Any]]] = None,
             cast_map_for_saving: Optional[Dict[Type, Callable[[Any], Any]]] = None,
