@@ -104,6 +104,5 @@ def dict_remove_context(d: dict) -> ContextManager[set]:
     finally:
         if not keys:
             return
-        for i in d:
-            if i in keys:
-                del d[i]
+        for k in keys:
+            d.pop(k)
