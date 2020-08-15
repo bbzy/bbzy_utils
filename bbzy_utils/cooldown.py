@@ -41,19 +41,26 @@ def cooldown_call_ignore(cooldown: float):
 def async_cooldown_call_wait(cooldown: float):
     def wrapper(func: Callable):
         last_call_time = 0
+        use_cooldown = True
 
         @wraps(func)
         async def callback(*args, **kwargs):
-            nonlocal last_call_time
-            cur_time = time.time()
-            seconds_left = cooldown - (cur_time - last_call_time)
-            if seconds_left > 0:
-                await asyncio.sleep(seconds_left)
-                last_call_time = cur_time + seconds_left
-            else:
-                last_call_time = cur_time
+            if use_cooldown:
+                nonlocal last_call_time
+                cur_time = time.time()
+                seconds_left = cooldown - (cur_time - last_call_time)
+                if seconds_left > 0:
+                    await asyncio.sleep(seconds_left)
+                    last_call_time = cur_time + seconds_left
+                else:
+                    last_call_time = cur_time
             return await func(*args, **kwargs)
-        callback.original_function = func
+
+        def set_use_cooldown(v: bool):
+            nonlocal use_cooldown
+            use_cooldown = v
+
+        callback.set_use_cooldown = set_use_cooldown
         return callback
 
     return wrapper
