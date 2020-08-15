@@ -5,7 +5,7 @@ import os
 import pickle
 from abc import abstractmethod
 from collections import defaultdict
-from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict
+from typing import Any, Callable, Iterator, Generic, TypeVar, Type, Optional, Dict, Union
 
 T = TypeVar('T')
 CompleteType = object
@@ -141,7 +141,13 @@ def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], An
 
     def _from_jsonable(_obj, _t: Type):
         _type_used = getattr(_t, '__origin__', None) or getattr(_t, '__extra__', None)
-        if _type_used is None:
+        if _type_used == Union:
+            for _cur_arg in getattr(_t, '__args__', ()):
+                if isinstance(None, _cur_arg):
+                    continue
+                _type_used = _cur_arg
+                break
+        elif _type_used is None:
             # For types are not in typing
             _type_used = _t
 

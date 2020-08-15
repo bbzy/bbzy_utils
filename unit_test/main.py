@@ -1,7 +1,7 @@
 import os
 import shutil
 import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from bbzy_utils.serializing import SerializableJsonObject, load_json
 from unittest.case import TestCase
 from unittest import main
@@ -121,7 +121,7 @@ class UnitTestCase(TestCase):
         json_object_file_dict['2014-01-01'] = [[4, {'int_arg': 3}]]
         json_object_file_dict.pop('2020-07-19')
         self.assertDictEqual(json_object_file_dict, load_json(json_object_base_path))
-        json_object = SerializableJsonObject(
+        SerializableJsonObject(
             json_object_base_path,
             Dict[datetime.date, List[Tuple[int, TestSerializingClass]]],
             dict(),
@@ -129,6 +129,17 @@ class UnitTestCase(TestCase):
             {datetime.date: lambda _dt: datetime.date.strftime(_dt, '%Y-%m-%d')}
         )
         self.assertDictEqual(json_object_file_dict, load_json(json_object_base_path))
+        os.remove(json_object_base_path + '.json')
+        json_object = SerializableJsonObject(
+            json_object_base_path,
+            Optional[int],
+            None,
+        )  # type: SerializableJsonObject[Optional[int]]
+        self.assertEqual(None, json_object.get_object())
+        json_object.set_object(3)
+        self.assertEqual(3, load_json(json_object_base_path))
+        json_object.set_object(None)
+        self.assertEqual(None, load_json(json_object_base_path))
 
 
 if __name__ == '__main__':
