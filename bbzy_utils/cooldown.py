@@ -53,7 +53,7 @@ def async_cooldown_call_wait(cooldown: float):
             else:
                 last_call_time = cur_time
             return await func(*args, **kwargs)
-
+        callback.original_function = func
         return callback
 
     return wrapper
