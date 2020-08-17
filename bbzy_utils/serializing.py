@@ -238,8 +238,10 @@ class SerializableObjectWrapper(Generic[T]):
     def __init__(self, serializable_object: SerializableObjectBase[T]):
         self._serializable_object = serializable_object
 
-    def w(self) -> T:
+    def w(self, v: Optional[T] = None) -> T:
         self._serializable_object.dirty = True
+        if v is not None:
+            self._serializable_object.set_object_without_saving(v)
         return self._serializable_object.get_object()
 
     def r(self) -> T:
