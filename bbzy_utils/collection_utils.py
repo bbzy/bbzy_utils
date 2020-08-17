@@ -74,13 +74,12 @@ def list_remove_context(a: list) -> ContextManager[Set[int]]:
     try:
         yield indices
     finally:
-        if not indices:
-            return
-        new_list = list()
-        for i, v in enumerate(a):
-            if i not in indices:
-                new_list.append(v)
-        a[:] = new_list
+        if indices:
+            new_list = list()
+            for i, v in enumerate(a):
+                if i not in indices:
+                    new_list.append(v)
+            a[:] = new_list
 
 
 @contextmanager
@@ -102,7 +101,6 @@ def dict_remove_context(d: dict) -> ContextManager[set]:
     try:
         yield keys
     finally:
-        if not keys:
-            return
-        for k in keys:
-            d.pop(k)
+        if keys:
+            for k in keys:
+                d.pop(k)
