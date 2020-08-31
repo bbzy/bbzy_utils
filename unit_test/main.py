@@ -140,6 +140,22 @@ class UnitTestCase(TestCase):
         self.assertEqual(3, load_json(json_object_base_path))
         json_object.set_object(None)
         self.assertEqual(None, load_json(json_object_base_path))
+        os.remove(json_object_base_path + '.json')
+        json_object = SerializableJsonObject(
+            json_object_base_path,
+            Optional[tuple],
+            None,
+            cast_map_for_loading={list: tuple},
+        )  # type: SerializableJsonObject[Optional[tuple]]
+        json_object.set_object((1, 2, 4))
+        del json_object
+        json_object = SerializableJsonObject(
+            json_object_base_path,
+            tuple,
+            tuple(),
+            cast_map_for_loading={list: tuple},
+        )  # type: SerializableJsonObject[Optional[tuple]]
+        self.assertEqual(json_object.get_object(), (1, 2, 4))
 
 
 if __name__ == '__main__':

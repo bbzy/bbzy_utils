@@ -121,8 +121,6 @@ def to_jsonable(obj, cast_map: Optional[Dict[type, Callable[[Any], Any]]] = None
         _cast_pred = cast_map.get(_type)
         if _cast_pred:
             return _to_jsonable(_cast_pred(_obj))
-        if _obj is None or isinstance(_obj, (str, int, float, bool)):
-            return _obj
         if isinstance(_obj, (list, set, tuple)):
             return [_to_jsonable(_i) for _i in _obj]
         if isinstance(_obj, (dict, defaultdict)):
@@ -130,7 +128,7 @@ def to_jsonable(obj, cast_map: Optional[Dict[type, Callable[[Any], Any]]] = None
         _pred = getattr(_obj, 'to_jsonable', None)
         if _pred:
             return _to_jsonable(_pred())
-        raise TypeError('Invalid type: {}'.format(_type))
+        return _obj
 
     return _to_jsonable(obj)
 
@@ -156,14 +154,6 @@ def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], An
         if _cast_pred is not None:
             return _cast_pred(_obj)
 
-        # ==== Primitive ====
-        if _type_used is str:
-            return str(_obj)
-        elif _type_used is int:
-            return int(_obj)
-        elif _type_used is float:
-            return float(_obj)
-
         # ==== Collection ====
         _arg_types = getattr(_t, '__args__', None)
         if _arg_types:
@@ -179,7 +169,7 @@ def from_jsonable(obj, t: Type, cast_map: Optional[Dict[Type, Callable[[Any], An
         _pred = getattr(_t, 'from_jsonable', None)
         if _pred:
             return _pred(_obj)
-        raise TypeError('Invalid value: {}'.format(_obj))
+        return _type_used(_obj)
 
     return _from_jsonable(obj, t)
 
