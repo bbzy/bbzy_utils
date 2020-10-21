@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from typing import Iterable, List, Any, Callable, TypeVar, Dict, \
     Iterator, Sized, Union, Reversible, ContextManager, Set
+import itertools
 
 T = TypeVar('T')
 K = TypeVar('K')
@@ -11,8 +12,9 @@ def dict_get(d: Dict[K, V], keys: Iterable[K]) -> Iterator[V]:
     return (d.get(k) for k in keys)
 
 
-def iter_adj(a: List[T], n: int) -> Iterator[tuple]:
-    return zip(*(a[i:] for i in range(n)))
+def iter_adj(a: Iterable, n: int) -> Iterator[tuple]:
+    iters = itertools.tee(a, n)
+    return zip(*(itertools.islice(iters[i], i, None) for i in range(n)))
 
 
 def dict_set_default(d: Dict[K, V], key: K, pred: Callable[[Any], V], *args, **kwargs) -> V:
